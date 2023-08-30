@@ -1,7 +1,7 @@
+import threading
 import tkinter as tk
-import serial.tools.list_ports
 import serial
-
+import time
 
 t_last_err = 0
 g_current_com_port_id = -1
@@ -33,15 +33,15 @@ def get_last_err_string(err=-1):
     if err == -1:
         err = t_last_err
     if err == ds_err_ok:
-        return "No errors"
+        return "Помилок немає"
     elif err == ds_err_port:
-        return "Failed to open port"
+        return "Не вдалося відкрити порт"
     elif err == ds_err_no_sensor:
-        return "Temperature sensor not found"
+        return "Датчик температури не знайдено"
     elif err == ds_err_io:
-        return "Error communicating with the sensor"
+        return "Помилка обміну даними з датчиком"
     elif err == ds_err_baud_rate:
-        return "Error changing baud rate"
+        return "Помилка зміни швидкості порту"
 
 def close_port(port=port_only):
     global g_current_com_port_id, t_last_err
@@ -51,9 +51,9 @@ def close_port(port=port_only):
     else:
         port_id = port
     if is_serial_port(port):
-        set_serial_port_status(port, pb_serial_port_dtr, 0)
-        set_serial_port_status(port, pb_serial_port_rts, 0)
-        close_serial_port(port)
+        set_serial_port_status(port, port_id.dtr, 0)
+        set_serial_port_status(port, port_id.rts, 0)
+        port.close()
         t_last_err = ds_err_ok
         return True
     else:
@@ -66,8 +66,8 @@ def open_port(com_port, port=port_only):
         close_port(port)
         port_id = port
     else:
-        port_id = pb_any
-    id = open_serial_port(port_id, com_port, 115200, pb_serial_port_no_parity, 8, 1, pb_serial_port_rts_handshake, 24, 24)
+        port_id = None
+    port_id = serial.Serial(port=com_port, baudrate=115200, parity=serial.PARITY_NONE, bytesize=serial.EIGHTBITS, stopbits=serial.STOPBITS_ONE, xonxoff=False, rtsctc=False, 24, 24)
     if id:
         if port == port_only:
             g_current_com_port_id = id
@@ -92,7 +92,7 @@ def reset_ds(port=port_only):
             write_serial_port_data(port, x)
             x = elapsed_milliseconds() + 100
             while available_serial_port_input(port) == 0 and elapsed_milliseconds() < x:
-                delay(2)
+                time.sleep(1)
             if available_serial_port_input(port) == 1:
                 x = 0
                 if read_serial_port_data(port, x) == 1:
@@ -157,16 +157,39 @@ def get_crc(buff, count):
             byte >>= 1
     return crc
 
+class crc_buff:
+    def __init__(self):
+        self.byte = [0]
+
+class ds_data_byte:
+    def __init__(self):
+        self.l_temo = 0
+        self.h_temo = 0
+        self.h_user = 0
+        self.l_user = 0
+        self.config = 0
+        self.x1 = 0
+        self.x2 = 0
+        self.x3 = 0
+        self.crc = 0
+
+def test_port_id(port):
+    if port == port_only:
+        return g_current_com_port_id
+    else:
+        return port
+
+
 def get_thermo(info, port=port_only):
     global t_last_err
-    t_last_err = ds_err_ok
     test_port_id(port)
+    t_last_err = ds_err_ok
     if is_serial_port(port):
-        clear_in_buf(port)
+        port.reset_input_buffer()
         if reset_ds(port):
             byte_rw(0xCC, port)
             byte_rw(0x44, port)
-            delay(800)
+            time.sleep(1)
             if reset_ds(port):
                 byte_rw(0xCC, port)
                 byte_rw(0xBE, port)
@@ -175,4 +198,5 @@ def get_thermo(info, port=port_only):
                 return True
     else:
         t_last_err = ds_err_port
-    return False
+        return False
+
